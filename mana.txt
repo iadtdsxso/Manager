@@ -98,9 +98,6 @@ class FileManager {
                 .btn-primary{background:#3498db;color:white}
                 .btn-primary:hover{background:#2980b9}
                 .error-message{background:#f8d7da;color:#721c24;padding:8px;border-radius:4px;margin-bottom:15px;text-align:center;font-size:14px}
-                .demo-accounts{margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px;font-size:12px;color:#666}
-                .demo-accounts h4{margin-bottom:5px;color:#333}
-                .security-warning{margin-top:15px;padding:10px;background:#fff3cd;border:1px solid #ffeaa7;border-radius:4px;font-size:12px;color:#856404;text-align:center}
             </style>
         </head>
         <body>
@@ -266,6 +263,55 @@ class FileManager {
         return true;
     }
 
+    private function handleFileUpload() {
+        if (!isset($_FILES['upload_files']) || empty($_FILES['upload_files']['name'][0])) {
+            throw new Exception("请选择要上传的文件");
+        }
+
+        $uploaded_files = $_FILES['upload_files'];
+        $total_files = count($uploaded_files['name']);
+        $success_count = 0;
+        $error_messages = array();
+
+        if (!is_writable($this->current_path)) {
+            throw new Exception("当前目录没有写入权限");
+        }
+
+        for ($i = 0; $i < $total_files; $i++) {
+            if ($uploaded_files['error'][$i] !== UPLOAD_ERR_OK) {
+                $error_messages[] = "文件 '{$uploaded_files['name'][$i]}' 上传失败 (错误代码: {$uploaded_files['error'][$i]})";
+                continue;
+            }
+
+            $filename = basename($uploaded_files['name'][$i]);
+            $target_path = $this->current_path . DIRECTORY_SEPARATOR . $filename;
+
+            // 如果文件已存在，添加序号
+            $counter = 1;
+            $original_name = pathinfo($filename, PATHINFO_FILENAME);
+            $extension = pathinfo($filename, PATHINFO_EXTENSION);
+
+            while (file_exists($target_path)) {
+                $filename = $original_name . '_' . $counter . ($extension ? '.' . $extension : '');
+                $target_path = $this->current_path . DIRECTORY_SEPARATOR . $filename;
+                $counter++;
+            }
+
+            if (move_uploaded_file($uploaded_files['tmp_name'][$i], $target_path)) {
+                $success_count++;
+            } else {
+                $error_messages[] = "文件 '{$uploaded_files['name'][$i]}' 移动失败";
+            }
+        }
+
+        $message = "成功上传 {$success_count} 个文件";
+        if (!empty($error_messages)) {
+            $message .= "，失败 " . count($error_messages) . " 个文件：" . implode('；', $error_messages);
+        }
+
+        return $message;
+    }
+
     public function handleActions() {
         $message = '';
         $message_type = 'success';
@@ -273,6 +319,10 @@ class FileManager {
         if (isset($_POST['action'])) {
             try {
                 switch ($_POST['action']) {
+                    case 'upload_file':
+                        $message = $this->handleFileUpload();
+                        break;
+
                     case 'create_file':
                         $filename = $_POST['filename'];
                         if ($filename) {
@@ -465,6 +515,8 @@ class FileManager {
                 .btn-danger{background:#e74c3c;color:white}
                 .btn-project{background:#9b59b6;color:white}
                 .btn-project:hover{background:#8e44ad}
+                .btn-upload{background:#1abc9c;color:white}
+                .btn-upload:hover{background:#16a085}
                 .message{padding:8px 12px;margin:8px 0;border-radius:3px;font-size:13px}
                 .message.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
                 .message.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}
@@ -490,9 +542,6 @@ class FileManager {
                 .file-info-item{margin-bottom:3px}
                 .editor-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:1px solid #ecf0f1}
                 .content-area{padding:15px}
-                .permission-help{margin-top:8px;padding:8px;background:#e8f4fd;border-radius:3px;font-size:11px;color:#2c3e50}
-                .permission-help h4{margin-bottom:3px;color:#3498db;font-size:12px}
-                .permission-help ul{margin:0;padding-left:15px}
                 .path-navigation{margin-bottom:10px;font-size:12px;color:#666}
                 .path-navigation a{color:#3498db;text-decoration:none}
                 .path-navigation a:hover{text-decoration:underline}
@@ -502,6 +551,18 @@ class FileManager {
                 .quick-link-btn:hover{background:#2980b9}
                 .quick-link-project{background:#9b59b6}
                 .quick-link-project:hover{background:#8e44ad}
+                .upload-container{margin-bottom:15px;padding:15px;background:#e8f4fd;border-radius:5px;border:2px dashed #3498db}
+                .upload-container h4{margin-bottom:10px;color:#2c3e50;font-size:14px}
+                .upload-form{display:flex;gap:10px;align-items:center}
+                .file-input{flex:1}
+                .progress-bar{width:100%;height:4px;background:#ecf0f1;border-radius:2px;margin-top:10px;overflow:hidden}
+                .progress-fill{height:100%;background:#27ae60;transition:width 0.3s}
+                .file-list{margin-top:10px;max-height:150px;overflow-y:auto;border:1px solid #ddd;border-radius:3px;padding:5px;background:#f9f9f9}
+                .file-item{padding:3px 5px;border-bottom:1px solid #eee;font-size:12px}
+                .file-item:last-child{border-bottom:none}
+                .file-name-text{display:inline-block;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+                .file-size{float:right;color:#666}
+                .drag-drop-text{text-align:center;color:#666;font-size:12px;padding:10px}
             </style>
         </head>
         <body>
@@ -523,6 +584,7 @@ class FileManager {
                 <div class="nav-buttons">
                     <button class="btn btn-primary" onclick="showModal('createFileModal')">新建文件</button>
                     <button class="btn btn-primary" onclick="showModal('createDirModal')">新建文件夹</button>
+                    <button class="btn btn-upload" onclick="showModal('uploadModal')">批量上传</button>
                     <button class="btn btn-warning" onclick="showModal('commandModal')">执行命令</button>
                     <button class="btn btn-success" onclick="location.reload()">刷新</button>
                     <a href="?path=/" class="btn btn-info">服务器根目录</a>
@@ -566,6 +628,24 @@ class FileManager {
                         </div>
                     </form>
                 <?php else: ?>
+                    <div class="upload-container" id="dropArea">
+                        <h4>批量上传文件 (支持拖放):</h4>
+                        <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                            <input type="hidden" name="action" value="upload_file">
+                            <div class="upload-form">
+                                <input type="file" name="upload_files[]" id="upload_files" class="form-control file-input" multiple required>
+                                <button type="submit" class="btn btn-upload">开始上传</button>
+                            </div>
+                            <div class="drag-drop-text">或拖放文件到此区域</div>
+                        </form>
+                        <div class="file-list" id="fileList">
+                            <div style="text-align:center;color:#999;padding:20px">未选择文件</div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="uploadProgress" style="width:0%"></div>
+                        </div>
+                    </div>
+
                     <div class="quick-links">
                         <h4>快速导航:</h4>
                         <a href="?path=/" class="quick-link-btn">/ (服务器根目录)</a>
@@ -684,6 +764,27 @@ class FileManager {
             </div>
         </div>
 
+        <div id="uploadModal" class="modal">
+            <div class="modal-content">
+                <h3>批量上传文件</h3>
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="action" value="upload_file">
+                    <div class="form-group">
+                        <label for="upload_files_input">选择文件 (可多选):</label>
+                        <input type="file" id="upload_files_input" name="upload_files[]" class="form-control" multiple required>
+                        <small style="color:#7f8c8d;">按住Ctrl键可选择多个文件</small>
+                    </div>
+                    <div id="modalFileList" class="file-list" style="margin-top:10px;max-height:150px;">
+                        <div style="text-align:center;color:#999;padding:20px">未选择文件</div>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+                        <button type="button" class="btn" onclick="hideModal('uploadModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">开始上传</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div id="renameModal" class="modal">
             <div class="modal-content">
                 <h3>重命名</h3>
@@ -779,6 +880,118 @@ class FileManager {
                     if(document.getElementById('file_content')){
                         document.querySelector('form [type="submit"]').click()
                     }
+                }
+            });
+
+            // 显示选择的文件列表
+            function updateFileList(inputId, listId) {
+                const input = document.getElementById(inputId);
+                const list = document.getElementById(listId);
+
+                input.addEventListener('change', function(e) {
+                    const files = e.target.files;
+                    if (files.length === 0) {
+                        list.innerHTML = '<div style="text-align:center;color:#999;padding:20px">未选择文件</div>';
+                        return;
+                    }
+
+                    let html = '';
+                    let totalSize = 0;
+
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const size = formatFileSize(file.size);
+                        totalSize += file.size;
+
+                        html += `
+                            <div class="file-item">
+                                <span class="file-name-text" title="${file.name}">${file.name}</span>
+                                <span class="file-size">${size}</span>
+                            </div>
+                        `;
+                    }
+
+                    html += `<div class="file-item" style="background:#f0f0f0;font-weight:bold">
+                        <span>总计: ${files.length} 个文件</span>
+                        <span class="file-size">${formatFileSize(totalSize)}</span>
+                    </div>`;
+
+                    list.innerHTML = html;
+                });
+            }
+
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            // 初始化文件列表显示
+            updateFileList('upload_files', 'fileList');
+            updateFileList('upload_files_input', 'modalFileList');
+
+            // 拖放功能
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('upload_files');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+
+            function highlight(e) {
+                dropArea.style.backgroundColor = '#d1ecf1';
+                dropArea.style.borderColor = '#117a8b';
+            }
+
+            function unhighlight(e) {
+                dropArea.style.backgroundColor = '';
+                dropArea.style.borderColor = '#3498db';
+            }
+
+            dropArea.addEventListener('drop', handleDrop, false);
+
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                fileInput.files = files;
+
+                const event = new Event('change', { bubbles: true });
+                fileInput.dispatchEvent(event);
+            }
+
+            // 上传文件进度模拟
+            document.getElementById('uploadForm').addEventListener('submit', function(e) {
+                const progressBar = document.getElementById('uploadProgress');
+                const fileInput = document.getElementById('upload_files');
+
+                if (fileInput.files.length > 0) {
+                    const fileCount = fileInput.files.length;
+                    progressBar.style.width = '0%';
+
+                    let progress = 0;
+                    const interval = setInterval(() => {
+                        progress += 100 / (fileCount * 10);
+                        if (progress >= 100) {
+                            progress = 100;
+                            clearInterval(interval);
+                        }
+                        progressBar.style.width = progress + '%';
+                    }, 200);
                 }
             });
         </script>
