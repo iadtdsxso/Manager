@@ -1,0 +1,439 @@
+<?php
+// Simple PHP File Manager Script for PHP 7/8 in WordPress environment
+// Note: This is a basic implementation. Use with caution on production servers.
+// Place this script in a secure location and add authentication as needed.
+// Assumes running in a directory where it has read/write permissions.
+
+// Error reporting
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Web root
+$web_root = realpath($_SERVER['DOCUMENT_ROOT']);
+
+// Root directory - set two levels up from web root
+$root_dir = realpath(dirname(dirname($web_root)));
+
+// Current directory from GET parameter
+if (!isset($_GET['dir'])) {
+    $script_dir = __DIR__;
+    $dir = substr($script_dir, strlen($root_dir) + 1);
+} else {
+    $dir = rtrim($_GET['dir'], '/');
+}
+$current_dir = realpath($root_dir . '/' . $dir);
+if (strpos($current_dir, realpath($root_dir)) !== 0) {
+    die('Invalid directory');
+}
+
+// Handle actions
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+
+    // Create file
+    if ($action === 'create_file') {
+        $filename = $current_dir . '/' . $_POST['filename'];
+        if (!file_exists($filename)) {
+            file_put_contents($filename, '');
+            echo 'File created.';
+        } else {
+            echo 'File already exists.';
+        }
+    }
+
+    // Edit file
+    if ($action === 'edit_file') {
+        $filename = $current_dir . '/' . $_POST['filename'];
+        if (file_exists($filename)) {
+            file_put_contents($filename, $_POST['content']);
+            echo 'File edited.';
+        }
+    }
+
+    // Delete files/folders (batch)
+    if ($action === 'delete') {
+        $items = $_POST['items'] ?? [];
+        foreach ($items as $item) {
+            $path = $current_dir . '/' . $item;
+            if (is_dir($path)) {
+                rmdir_recursive($path);
+            } else {
+                unlink($path);
+            }
+        }
+        echo 'Items deleted.';
+    }
+
+    // Rename
+    if ($action === 'rename') {
+        $old = $current_dir . '/' . $_POST['old'];
+        $new = $current_dir . '/' . $_POST['new'];
+        rename($old, $new);
+        echo 'Renamed.';
+    }
+
+    // Create folder
+    if ($action === 'create_folder') {
+        $folder = $current_dir . '/' . $_POST['foldername'];
+        mkdir($folder, 0755, true);
+        echo 'Folder created.';
+    }
+
+    // Change permissions (batch)
+    if ($action === 'chmod') {
+        $perms = octdec($_POST['perms']);
+        $items = $_POST['items'] ?? [];
+        foreach ($items as $item) {
+            $path = $current_dir . '/' . $item;
+            chmod_recursive($path, $perms);
+        }
+        echo 'Permissions changed.';
+    }
+
+    // Upload (batch)
+    if ($action === 'upload' && !empty($_FILES['files'])) {
+        foreach ($_FILES['files']['tmp_name'] as $key => $tmp_name) {
+            if ($_FILES['files']['error'][$key] === 0) {
+                $target = $current_dir . '/' . basename($_FILES['files']['name'][$key]);
+                move_uploaded_file($tmp_name, $target);
+            }
+        }
+        echo 'Files uploaded.';
+    }
+
+    // Refresh after action
+    header('Location: ?dir=' . urlencode($dir));
+    exit;
+}
+
+// Recursive delete function
+function rmdir_recursive($dir) {
+    if (is_dir($dir)) {
+        $objects = scandir($dir);
+        foreach ($objects as $object) {
+            if ($object != "." && $object != "..") {
+                $path = $dir . "/" . $object;
+                if (is_dir($path)) {
+                    rmdir_recursive($path);
+                } else {
+                    unlink($path);
+                }
+            }
+        }
+        rmdir($dir);
+    } else {
+        unlink($dir);
+    }
+}
+
+// Recursive chmod function
+function chmod_recursive($path, $perms) {
+    if (is_dir($path)) {
+        chmod($path, $perms);
+        $objects = scandir($path);
+        foreach ($objects as $object) {
+            if ($object != "." && $object != "..") {
+                chmod_recursive($path . "/" . $object, $perms);
+            }
+        }
+    } else {
+        chmod($path, $perms);
+    }
+}
+
+// List files and folders
+$items = scandir($current_dir);
+$files = [];
+$folders = [];
+foreach ($items as $item) {
+    if ($item === '.' || $item === '..') continue;
+    $path = $current_dir . '/' . $item;
+    $size = is_dir($path) ? '-' : filesize($path);
+    $perms = substr(sprintf('%o', fileperms($path)), -4);
+    if (is_dir($path)) {
+        $folders[] = ['name' => $item, 'size' => $size, 'perms' => $perms, 'path' => $path];
+    } else {
+        $files[] = ['name' => $item, 'size' => $size, 'perms' => $perms, 'path' => $path];
+    }
+}
+
+// Build clickable current path
+$full_path = realpath($current_dir);
+$parts = explode('/', $full_path);
+$accum = '';
+
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; color: #333; margin: 20px; }
+        h1 { color: #007bff; }
+        h2 { color: #0056b3; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        tr:hover { background-color: #e9ecef; cursor: pointer; }
+        button, input[type="submit"] { background-color: #007bff; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
+        button:hover { background-color: #0056b3; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        form { margin-bottom: 20px; }
+        #modals { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        #modals > div { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.2); width: 50%; max-width: 600px; }
+        .modal { display: none; }
+        textarea { width: 100%; height: 200px; }
+    </style>
+</head>
+<body>
+    <h1>File Manager</h1>
+    <p>Current Path: 
+        <?php
+        foreach ($parts as $part) {
+            if ($part === '') continue;
+            $accum .= '/' . $part;
+            $rel_dir = substr($accum, strlen($root_dir));
+            $url_dir = urlencode(ltrim($rel_dir, '/'));
+            echo '<a href="?dir=' . $url_dir . '">' . htmlspecialchars($part) . '</a> / ';
+        }
+        ?>
+    </p>
+    <a href="?dir=<?php echo urlencode(fm_get_parent_path($dir)); ?>">Parent Directory</a>
+
+    <!-- Modals container -->
+    <div id="modals">
+        <!-- Edit form -->
+        <div id="edit-modal" class="modal">
+            <form method="post">
+                <input type="hidden" name="action" value="edit_file">
+                <input type="hidden" name="filename" id="edit-filename">
+                <textarea name="content" id="edit-content"></textarea>
+                <button type="submit">Save</button>
+                <button type="button" onclick="closeModal()">Cancel</button>
+            </form>
+        </div>
+
+        <!-- Rename form -->
+        <div id="rename-modal" class="modal">
+            <form method="post">
+                <input type="hidden" name="action" value="rename">
+                <input type="hidden" name="old" id="rename-old">
+                <input type="text" name="new" id="rename-new">
+                <button type="submit">Rename</button>
+                <button type="button" onclick="closeModal()">Cancel</button>
+            </form>
+        </div>
+
+        <!-- Chmod form -->
+        <div id="chmod-modal" class="modal">
+            <form method="post" id="chmod-form">
+                <input type="hidden" name="action" value="chmod">
+                <input type="text" name="perms" placeholder="0755">
+                <button type="submit">Change</button>
+                <button type="button" onclick="closeModal()">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create file -->
+    <h2>Create File</h2>
+    <form method="post">
+        <input type="hidden" name="action" value="create_file">
+        <input type="text" name="filename" placeholder="Filename">
+        <button type="submit">Create</button>
+    </form>
+
+    <!-- Create folder -->
+    <h2>Create Folder</h2>
+    <form method="post">
+        <input type="hidden" name="action" value="create_folder">
+        <input type="text" name="foldername" placeholder="Folder name">
+        <button type="submit">Create</button>
+    </form>
+
+    <!-- Upload files -->
+    <h2>Upload Files</h2>
+    <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="action" value="upload">
+        <input type="file" name="files[]" multiple>
+        <button type="submit">Upload</button>
+    </form>
+
+    <!-- Batch actions -->
+    <form method="post" id="batch-form">
+        <input type="hidden" name="action" id="batch-action">
+        <button type="button" onclick="batchDelete()">Delete Selected</button>
+        <button type="button" onclick="batchChmod()">Change Permissions Selected</button>
+
+        <table>
+            <tr>
+                <th><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
+                <th>Name</th>
+                <th>Size (bytes)</th>
+                <th>Permissions</th>
+                <th>Actions</th>
+            </tr>
+            <?php foreach ($folders as $folder): ?>
+            <tr onclick="toggleCheckbox(this, event)">
+                <td><input type="checkbox" name="items[]" value="<?php echo htmlspecialchars($folder['name']); ?>" class="item-checkbox"></td>
+                <td><a href="?dir=<?php echo urlencode($dir . '/' . $folder['name']); ?>"><?php echo htmlspecialchars($folder['name']); ?>/</a></td>
+                <td><?php echo $folder['size']; ?></td>
+                <td><?php echo $folder['perms']; ?></td>
+                <td>
+                    <button type="button" onclick="renameItem('<?php echo htmlspecialchars($folder['name']); ?>')">Rename</button>
+                    <button type="button" onclick="chmodItem('<?php echo htmlspecialchars($folder['name']); ?>')">Chmod</button>
+                    <button type="button" onclick="deleteItem('<?php echo htmlspecialchars($folder['name']); ?>')">Delete</button>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            <?php foreach ($files as $file): ?>
+            <tr onclick="toggleCheckbox(this, event)">
+                <td><input type="checkbox" name="items[]" value="<?php echo htmlspecialchars($file['name']); ?>" class="item-checkbox"></td>
+                <td><?php echo htmlspecialchars($file['name']); ?></td>
+                <td><?php echo $file['size']; ?></td>
+                <td><?php echo $file['perms']; ?></td>
+                <td>
+                    <?php if (strpos($file['path'], $web_root) === 0): ?>
+                    <a href="<?php echo htmlspecialchars(substr($file['path'], strlen($web_root))); ?>" target="_blank">Open</a>
+                    <?php endif; ?>
+                    <button type="button" onclick="editFile('<?php echo htmlspecialchars($file['name']); ?>')">Edit</button>
+                    <button type="button" onclick="renameItem('<?php echo htmlspecialchars($file['name']); ?>')">Rename</button>
+                    <button type="button" onclick="chmodItem('<?php echo htmlspecialchars($file['name']); ?>')">Chmod</button>
+                    <button type="button" onclick="deleteItem('<?php echo htmlspecialchars($file['name']); ?>')">Delete</button>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </form>
+
+    <script>
+        function toggleSelectAll(source) {
+            const checkboxes = document.querySelectorAll('.item-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = source.checked;
+            });
+        }
+
+        function toggleCheckbox(row, event) {
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'A' || event.target.tagName === 'BUTTON') {
+                return;
+            }
+            const checkbox = row.querySelector('.item-checkbox');
+            checkbox.checked = !checkbox.checked;
+        }
+
+        function showModal(modalId) {
+            document.getElementById('modals').style.display = 'flex';
+            document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+            document.getElementById(modalId).style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('modals').style.display = 'none';
+        }
+
+        function editFile(filename) {
+            fetch('?dir=<?php echo urlencode($dir); ?>&get_content=' + encodeURIComponent(filename))
+                .then(response => response.text())
+                .then(content => {
+                    document.getElementById('edit-filename').value = filename;
+                    document.getElementById('edit-content').value = content;
+                    showModal('edit-modal');
+                });
+        }
+
+        function renameItem(name) {
+            document.getElementById('rename-old').value = name;
+            document.getElementById('rename-new').value = name;
+            showModal('rename-modal');
+        }
+
+        function chmodItem(name) {
+            const form = document.getElementById('chmod-form');
+            form.innerHTML = '';
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'chmod';
+            form.appendChild(actionInput);
+            const itemInput = document.createElement('input');
+            itemInput.type = 'hidden';
+            itemInput.name = 'items[]';
+            itemInput.value = name;
+            form.appendChild(itemInput);
+            const permsInput = document.createElement('input');
+            permsInput.type = 'text';
+            permsInput.name = 'perms';
+            permsInput.placeholder = '0755';
+            form.appendChild(permsInput);
+            const submitButton = document.createElement('button');
+            submitButton.type = 'submit';
+            submitButton.innerText = 'Change';
+            form.appendChild(submitButton);
+            const cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.onclick = closeModal;
+            cancelButton.innerText = 'Cancel';
+            form.appendChild(cancelButton);
+            showModal('chmod-modal');
+        }
+
+        function deleteItem(name) {
+            if (confirm('Are you sure you want to delete ' + name + '?')) {
+                const form = document.getElementById('batch-form');
+                const actionInput = document.getElementById('batch-action');
+                actionInput.value = 'delete';
+                // Remove existing items[]
+                const existingItems = form.querySelectorAll('input[name="items[]"]');
+                existingItems.forEach(item => item.remove());
+                // Add the single item
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'items[]';
+                input.value = name;
+                form.appendChild(input);
+                form.submit();
+            }
+        }
+
+        function batchDelete() {
+            if (confirm('Are you sure you want to delete selected items?')) {
+                document.getElementById('batch-action').value = 'delete';
+                document.getElementById('batch-form').submit();
+            }
+        }
+
+        function batchChmod() {
+            const perms = prompt('Enter permissions (e.g., 0755):');
+            if (perms) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'perms';
+                input.value = perms;
+                document.getElementById('batch-form').appendChild(input);
+                document.getElementById('batch-action').value = 'chmod';
+                document.getElementById('batch-form').submit();
+            }
+        }
+    </script>
+
+    <?php
+    // Handle get_content for edit
+    if (isset($_GET['get_content'])) {
+        $file = $current_dir . '/' . $_GET['get_content'];
+        if (file_exists($file)) {
+            echo file_get_contents($file);
+        }
+        exit;
+    }
+
+    // Parent path function
+    function fm_get_parent_path($path) {
+        $path = rtrim($path, '/');
+        return substr($path, 0, strrpos($path, '/'));
+    }
+    ?>
+</body>
+</html>
